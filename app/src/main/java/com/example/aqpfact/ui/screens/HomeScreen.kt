@@ -1,9 +1,11 @@
 package com.example.aqpfact.ui.screens
 
-import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -13,9 +15,12 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.aqpfact.data.Reading
 import com.example.aqpfact.ui.MainViewModel
 import java.text.SimpleDateFormat
@@ -30,7 +35,6 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToBillSettings: () -> Unit
 ) {
-    val context = LocalContext.current
     val readings by viewModel.allReadings.collectAsState()
     var showSyncDialog by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
@@ -112,7 +116,7 @@ fun HomeScreen(
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Statistiche Bolletta", style = MaterialTheme.typography.titleLarge)
                         IconButton(onClick = onNavigateToBillSettings) {
-                            Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = "Modifica Costi")
+                            Icon(Icons.Default.Edit, contentDescription = "Modifica Costi")
                         }
                     }
                     
@@ -143,18 +147,18 @@ fun HomeScreen(
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("$meterName:", style = MaterialTheme.typography.bodyMedium)
-                            Text("${String.format("%.2f", total)} € (${String.format("%.1f", consumption)} m³)", style = MaterialTheme.typography.bodyLarge)
+                            Text("${String.format(Locale.getDefault(), "%.2f", total)} € (${String.format(Locale.getDefault(), "%.1f", consumption)} m³)", style = MaterialTheme.typography.bodyLarge)
                         }
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
-                    Divider()
+                    HorizontalDivider()
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
                             val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
@@ -172,19 +176,39 @@ fun HomeScreen(
             }
 
             Text("Cronologia Sessioni", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             val groupedReadings = readings.groupBy { it.groupId ?: it.date.toString() }
+                .toList().sortedByDescending { it.first }
 
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(groupedReadings.values.toList()) { sessionReadings ->
-                    SessionItem(sessionReadings, meterNames = meterNames, onDelete = { 
-                        val groupId = sessionReadings.first().groupId
-                        if (groupId != null) {
-                            viewModel.deleteSession(groupId)
-                        } else {
-                            viewModel.deleteReading(sessionReadings.first().id)
+            Box(modifier = Modifier.weight(1f).padding(horizontal = 16.dp).horizontalScroll(rememberScrollState())) {
+                Column {
+                    // Header Tabella
+                    Row(modifier = Modifier.background(MaterialTheme.colorScheme.surfaceVariant).padding(8.dp)) {
+                        TableHeaderItem("Data", 80)
+                        TableHeaderItem(meterNames[0]?.take(8) ?: "Gen", 70)
+                        TableHeaderItem(meterNames[1]?.take(8) ?: "Ut 1", 70)
+                        TableHeaderItem(meterNames[2]?.take(8) ?: "Ut 2", 70)
+                        TableHeaderItem(meterNames[3]?.take(8) ?: "Ut 3", 70)
+                        TableHeaderItem("Sfrido", 70)
+                        TableHeaderItem("Azione", 60)
+                    }
+                    
+                    LazyColumn(modifier = Modifier.fillMaxWidth()) {
+                        items(groupedReadings) { (_, sessionReadings) ->
+                            SessionRow(
+                                date = sessionReadings.first().date,
+                                readings = sessionReadings,
+                                allReadings = readings,
+                                onDelete = {
+                                    val id = sessionReadings.first().groupId
+                                    if (id != null) viewModel.deleteSession(id) 
+                                    else viewModel.deleteReading(sessionReadings.first().id)
+                                }
+                            )
+                            HorizontalDivider()
                         }
-                    })
+                    }
                 }
             }
         }
@@ -192,28 +216,63 @@ fun HomeScreen(
 }
 
 @Composable
-fun SessionItem(sessionReadings: List<Reading>, meterNames: Map<Int, String>, onDelete: () -> Unit) {
-    val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
-    val date = sessionReadings.first().date
+fun TableHeaderItem(text: String, width: Int) {
+    Text(
+        text = text,
+        modifier = Modifier.width(width.dp),
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1
+    )
+}
+
+@Composable
+fun SessionRow(
+    date: Long,
+    readings: List<Reading>,
+    allReadings: List<Reading>,
+    onDelete: () -> Unit
+) {
+    val sdf = SimpleDateFormat("dd/MM/yy", Locale.getDefault())
     
-    Card(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Sessione: ${sdf.format(Date(date))}", style = MaterialTheme.typography.titleSmall)
-                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Delete, contentDescription = "Elimina Sessione", tint = MaterialTheme.colorScheme.error)
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            sessionReadings.sortedBy { it.meterId }.forEach { reading ->
-                val meterName = meterNames[reading.meterId] ?: "Utenza ${reading.meterId}"
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("$meterName:", style = MaterialTheme.typography.bodySmall)
-                    Text("${reading.value} m³", style = MaterialTheme.typography.bodyMedium)
-                }
+    // Calcolo sfrido per la riga
+    val readingsByMeter = allReadings.groupBy { it.meterId }.mapValues { it.value.sortedByDescending { r -> r.date } }
+    var genCons = 0.0
+    var userConsSum = 0.0
+    
+    (0..3).forEach { mId ->
+        val current = readings.find { it.meterId == mId }
+        if (current != null) {
+            val prev = readingsByMeter[mId]?.find { it.date < date }
+            val cons = if (prev != null) (current.value - prev.value).coerceAtLeast(0.0) else current.value
+            if (mId == 0) genCons = cons else userConsSum += cons
+        }
+    }
+    val sfrido = genCons - userConsSum
+
+    Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        TableCell(sdf.format(Date(date)), 80)
+        TableCell(readings.find { it.meterId == 0 }?.value?.toString() ?: "-", 70)
+        TableCell(readings.find { it.meterId == 1 }?.value?.toString() ?: "-", 70)
+        TableCell(readings.find { it.meterId == 2 }?.value?.toString() ?: "-", 70)
+        TableCell(readings.find { it.meterId == 3 }?.value?.toString() ?: "-", 70)
+        TableCell(String.format(Locale.getDefault(), "%.2f", sfrido), 70)
+        
+        Box(modifier = Modifier.width(60.dp), contentAlignment = Alignment.Center) {
+            IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                Icon(Icons.Default.Delete, contentDescription = "Elimina", tint = MaterialTheme.colorScheme.error)
             }
         }
     }
+}
+
+@Composable
+fun TableCell(text: String, width: Int) {
+    Text(
+        text = text,
+        modifier = Modifier.width(width.dp),
+        style = MaterialTheme.typography.bodySmall,
+        fontSize = 12.sp,
+        maxLines = 1
+    )
 }
