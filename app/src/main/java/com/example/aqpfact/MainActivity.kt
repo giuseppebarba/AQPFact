@@ -6,15 +6,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
 import com.example.aqpfact.ui.MainViewModel
 import com.example.aqpfact.ui.screens.AddReadingScreen
+import com.example.aqpfact.ui.screens.BillSettingsScreen
 import com.example.aqpfact.ui.screens.HomeScreen
 import com.example.aqpfact.ui.screens.ReportScreen
+import com.example.aqpfact.ui.screens.SettingsScreen
 import com.example.aqpfact.ui.theme.AQPFactTheme
 
 class MainActivity : ComponentActivity() {
@@ -38,21 +38,34 @@ fun AppNavigation() {
         composable("home") {
             HomeScreen(
                 viewModel = viewModel,
-                onNavigateToAddReading = { meterId ->
-                    navController.navigate("add_reading/$meterId")
+                onNavigateToAddReading = {
+                    navController.navigate("add_reading")
                 },
                 onNavigateToReport = {
                     navController.navigate("report")
+                },
+                onNavigateToSettings = {
+                    navController.navigate("settings")
+                },
+                onNavigateToBillSettings = {
+                    navController.navigate("bill_settings")
                 }
             )
         }
-        composable(
-            "add_reading/{meterId}",
-            arguments = listOf(navArgument("meterId") { type = NavType.IntType })
-        ) { backStackEntry ->
-            val meterId = backStackEntry.arguments?.getInt("meterId") ?: 0
+        composable("bill_settings") {
+            BillSettingsScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable("settings") {
+            SettingsScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable("add_reading") {
             AddReadingScreen(
-                meterId = meterId,
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() }
             )

@@ -14,4 +14,8 @@ class ReadingRepository(private val readingDao: ReadingDao) {
     suspend fun delete(id: Long) {
         readingDao.deleteById(id)
     }
+
+    suspend fun deleteSession(groupId: String) {
+        readingDao.deleteByGroupId(groupId)
+    }
 }

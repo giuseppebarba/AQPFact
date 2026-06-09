@@ -1,7 +1,6 @@
 package com.example.aqpfact.ui.screens
 
 import android.Manifest
-import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -9,6 +8,8 @@ import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -22,19 +23,25 @@ import com.example.aqpfact.ui.MainViewModel
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
-import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddReadingScreen(
-    meterId: Int,
     viewModel: MainViewModel,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    var currentStep by remember { mutableIntStateOf(0) } // 0: Main, 1: User 1, 2: User 2, 3: User 3
+    val totalSteps = 4
+    
+    val sessionReadings = remember { mutableStateListOf<Triple<Int, Double, String?>>() }
+    
     var value by remember { mutableStateOf("") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var hasCameraPermission by remember { mutableStateOf(false) }
+
+    val meterNames by viewModel.meterNames.collectAsState()
+    val meterName = meterNames[currentStep] ?: (if (currentStep == 0) "Generale" else "Utenza $currentStep")
 
     val launcher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -46,40 +53,117 @@ fun AddReadingScreen(
         launcher.launch(Manifest.permission.CAMERA)
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Nuova Lettura: ${if (meterId == 0) "Generale" else "Utenza $meterId"}", style = MaterialTheme.typography.headlineMedium)
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (hasCameraPermission && photoUri == null) {
-            CameraPreview(onImageCaptured = { uri -> photoUri = uri })
-        } else if (photoUri != null) {
-            Text("Foto acquisita!")
-            Button(onClick = { photoUri = null }) {
-                Text("Rifare foto")
-            }
+    Scaffold(
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Sessione di Lettura ($meterName)") }
+            )
         }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = value,
-            onValueChange = { value = it },
-            label = { Text("Valore contatore (m³)") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Button(
-            onClick = {
-                val v = value.toDoubleOrNull() ?: 0.0
-                viewModel.addReading(meterId, v, photoUri?.toString())
-                onBack()
-            },
-            enabled = value.isNotEmpty()
+    ) { padding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Salva Lettura")
+            LinearProgressIndicator(
+                progress = { (currentStep.coerceAtMost(totalSteps - 1) + 1).toFloat() / totalSteps },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            )
+
+            if (currentStep < totalSteps) {
+                Text(
+                    "Acquisizione: $meterName",
+                    style = MaterialTheme.typography.headlineMedium
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                if (hasCameraPermission && photoUri == null) {
+                    CameraPreview(onImageCaptured = { uri -> photoUri = uri })
+                } else if (photoUri != null) {
+                    Text("Foto acquisita!")
+                    Button(onClick = { photoUri = null }) {
+                        Text("Rifare foto")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = { value = it },
+                    label = { Text("Valore contatore (m³)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Button(
+                    onClick = {
+                        val v = value.toDoubleOrNull() ?: 0.0
+                        sessionReadings.add(Triple(currentStep, v, photoUri?.toString()))
+                        
+                        if (currentStep < totalSteps - 1) {
+                            currentStep++
+                            value = ""
+                            photoUri = null
+                        } else {
+                            viewModel.addReadingSession(sessionReadings.toList())
+                            currentStep++ 
+                        }
+                    },
+                    enabled = value.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (currentStep < totalSteps - 1) "Prossimo Contatore" else "Concludi e Salva")
+                }
+            } else {
+                // Step di Riepilogo Finale
+                val generalValue = sessionReadings.find { it.first == 0 }?.second ?: 0.0
+                
+                Icon(
+                    Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                
+                Text(
+                    "Sessione Salvata!",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(vertical = 16.dp)
+                )
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text("Valore Contatore Generale da comunicare:", style = MaterialTheme.typography.titleMedium)
+                        Text("$generalValue m³", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text("Ricordati di comunicare questo valore al fornitore per l'emissione della prossima fattura.")
+                    }
+                }
+                
+                Spacer(modifier = Modifier.weight(1f))
+                
+                Button(
+                    onClick = onBack,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Torna alla Home")
+                }
+            }
+            
+            if (currentStep < totalSteps) {
+                TextButton(onClick = onBack) {
+                    Text("Annulla Sessione (Non verrà salvato nulla)")
+                }
+            }
         }
     }
 }

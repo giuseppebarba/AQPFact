@@ -86,6 +86,9 @@ dependencies {
     implementation(libs.pcloud.android)
     implementation(libs.pcloud.core)
 
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

@@ -1,15 +1,20 @@
 package com.example.aqpfact.ui.screens
 
+import android.content.Intent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.aqpfact.data.Reading
 import com.example.aqpfact.ui.MainViewModel
@@ -20,17 +25,26 @@ import java.util.*
 @Composable
 fun HomeScreen(
     viewModel: MainViewModel,
-    onNavigateToAddReading: (Int) -> Unit,
-    onNavigateToReport: () -> Unit
+    onNavigateToAddReading: () -> Unit,
+    onNavigateToReport: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateToBillSettings: () -> Unit
 ) {
+    val context = LocalContext.current
     val readings by viewModel.allReadings.collectAsState()
     var showSyncDialog by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
     
-    var totalBillCost by remember { mutableStateOf("0.0") }
-    var fixedCosts by remember { mutableStateOf("0.0") }
+    val pCloudToken by viewModel.pCloudToken.collectAsState()
+    val meterNames by viewModel.meterNames.collectAsState()
     
-    var showAddOptions by remember { mutableStateOf(false) }
+    val totalBillCost by viewModel.lastBillTotal.collectAsState()
+    val fixedCosts by viewModel.lastBillFixed.collectAsState()
+    val nextReadingDate by viewModel.nextReadingDate.collectAsState()
+
+    LaunchedEffect(pCloudToken) {
+        if (pCloudToken != null) token = pCloudToken!!
+    }
 
     if (showSyncDialog) {
         AlertDialog(
@@ -63,39 +77,14 @@ fun HomeScreen(
         )
     }
 
-    if (showAddOptions) {
-        AlertDialog(
-            onDismissRequest = { showAddOptions = false },
-            title = { Text("Seleziona Utenza") },
-            text = {
-                Column {
-                    (0..3).forEach { id ->
-                        TextButton(
-                            onClick = {
-                                onNavigateToAddReading(id)
-                                showAddOptions = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(if (id == 0) "Contatore Generale" else "Utenza $id")
-                        }
-                    }
-                }
-            },
-            confirmButton = {},
-            dismissButton = {
-                TextButton(onClick = { showAddOptions = false }) {
-                    Text("Annulla")
-                }
-            }
-        )
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("AQPFact") },
                 actions = {
+                    IconButton(onClick = { onNavigateToSettings() }) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
                     IconButton(onClick = { onNavigateToReport() }) {
                         Icon(Icons.Default.Share, contentDescription = "Report")
                     }
@@ -106,8 +95,8 @@ fun HomeScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { showAddOptions = true }) {
-                Icon(Icons.Default.Add, contentDescription = "Aggiungi Lettura")
+            FloatingActionButton(onClick = { onNavigateToAddReading() }) {
+                Icon(Icons.Default.Add, contentDescription = "Nuova Sessione di Lettura")
             }
         }
     ) { padding ->
@@ -120,26 +109,14 @@ fun HomeScreen(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("Statistiche Ultima Bolletta", style = MaterialTheme.typography.titleLarge)
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(
-                            value = totalBillCost,
-                            onValueChange = { totalBillCost = it },
-                            label = { Text("Totale (€)") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
-                        OutlinedTextField(
-                            value = fixedCosts,
-                            onValueChange = { fixedCosts = it },
-                            label = { Text("Fisse (€)") },
-                            modifier = Modifier.weight(1f),
-                            singleLine = true
-                        )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Statistiche Bolletta", style = MaterialTheme.typography.titleLarge)
+                        IconButton(onClick = onNavigateToBillSettings) {
+                            Icon(androidx.compose.material.icons.Icons.Default.Edit, contentDescription = "Modifica Costi")
+                        }
                     }
                     
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
                     
                     val totalBill = totalBillCost.toDoubleOrNull() ?: 0.0
                     val totalFixed = fixedCosts.toDoubleOrNull() ?: 0.0
@@ -159,23 +136,55 @@ fun HomeScreen(
                     
                     userConsumptions.forEachIndexed { index, consumption ->
                         val id = index + 1
+                        val meterName = meterNames[id] ?: "Utenza $id"
                         val varCost = if (totalConsumption > 0) (consumption / totalConsumption) * totalVariable else 0.0
                         val fixedCost = totalFixed / 3.0
                         val total = varCost + fixedCost
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Utenza $id:", style = MaterialTheme.typography.bodyMedium)
+                            Text("$meterName:", style = MaterialTheme.typography.bodyMedium)
                             Text("${String.format("%.2f", total)} € (${String.format("%.1f", consumption)} m³)", style = MaterialTheme.typography.bodyLarge)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Divider()
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column {
+                            val sdf = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                            Text("Prossima Lettura:", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                nextReadingDate?.let { sdf.format(Date(it)) } ?: "Non impostata",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                        Button(onClick = onNavigateToBillSettings) {
+                            Text(if (nextReadingDate == null) "Pianifica" else "Modifica")
                         }
                     }
                 }
             }
 
-            Text("Cronologia Letture", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+            Text("Cronologia Sessioni", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(horizontal = 16.dp))
+
+            val groupedReadings = readings.groupBy { it.groupId ?: it.date.toString() }
 
             LazyColumn(modifier = Modifier.weight(1f)) {
-                items(readings) { reading ->
-                    ReadingItem(reading, onDelete = { viewModel.deleteReading(reading.id) })
+                items(groupedReadings.values.toList()) { sessionReadings ->
+                    SessionItem(sessionReadings, meterNames = meterNames, onDelete = { 
+                        val groupId = sessionReadings.first().groupId
+                        if (groupId != null) {
+                            viewModel.deleteSession(groupId)
+                        } else {
+                            viewModel.deleteReading(sessionReadings.first().id)
+                        }
+                    })
                 }
             }
         }
@@ -183,18 +192,27 @@ fun HomeScreen(
 }
 
 @Composable
-fun ReadingItem(reading: Reading, onDelete: () -> Unit) {
+fun SessionItem(sessionReadings: List<Reading>, meterNames: Map<Int, String>, onDelete: () -> Unit) {
     val sdf = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
+    val date = sessionReadings.first().date
+    
     Card(modifier = Modifier.fillMaxWidth().padding(8.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Meter: ${if (reading.meterId == 0) "Generale" else "Utenza ${reading.meterId}"}")
-            Text("Valore: ${reading.value} m³")
-            Text("Data: ${sdf.format(Date(reading.date))}")
-            if (reading.photoPath != null) {
-                Text("Foto allegata")
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text("Sessione: ${sdf.format(Date(date))}", style = MaterialTheme.typography.titleSmall)
+                IconButton(onClick = onDelete, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Delete, contentDescription = "Elimina Sessione", tint = MaterialTheme.colorScheme.error)
+                }
             }
-            IconButton(onClick = onDelete) {
-                Text("Elimina", color = MaterialTheme.colorScheme.error)
+            
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            sessionReadings.sortedBy { it.meterId }.forEach { reading ->
+                val meterName = meterNames[reading.meterId] ?: "Utenza ${reading.meterId}"
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("$meterName:", style = MaterialTheme.typography.bodySmall)
+                    Text("${reading.value} m³", style = MaterialTheme.typography.bodyMedium)
+                }
             }
         }
     }
