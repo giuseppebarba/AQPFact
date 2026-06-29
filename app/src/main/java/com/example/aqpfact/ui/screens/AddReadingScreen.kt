@@ -1,6 +1,7 @@
 package com.example.aqpfact.ui.screens
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -10,6 +11,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -39,18 +41,25 @@ fun AddReadingScreen(
     var value by remember { mutableStateOf("") }
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var hasCameraPermission by remember { mutableStateOf(false) }
+    var hasSmsPermission by remember { mutableStateOf(false) }
 
     val meterNames by viewModel.meterNames.collectAsState()
     val meterName = meterNames[currentStep] ?: (if (currentStep == 0) "Generale" else "Utenza $currentStep")
 
-    val launcher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        hasCameraPermission = isGranted
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        hasCameraPermission = permissions[Manifest.permission.CAMERA] ?: false
+        hasSmsPermission = permissions[Manifest.permission.SEND_SMS] ?: false
     }
 
     LaunchedEffect(Unit) {
-        launcher.launch(Manifest.permission.CAMERA)
+        permissionLauncher.launch(
+            arrayOf(
+                Manifest.permission.CAMERA,
+                Manifest.permission.SEND_SMS
+            )
+        )
     }
 
     Scaffold(
@@ -143,9 +152,30 @@ fun AddReadingScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Valore Contatore Generale da comunicare:", style = MaterialTheme.typography.titleMedium)
-                        Text("$generalValue m³", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
+                        Text("${generalValue.toInt()} m³", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Ricordati di comunicare questo valore al fornitore per l'emissione della prossima fattura.")
+                        
+                        Spacer(modifier = Modifier.height(16.dp))
+                        
+                        Button(
+                            onClick = { viewModel.sendSmsReading(generalValue) },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = hasSmsPermission
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Invia SMS al Fornitore")
+                        }
+                        
+                        if (!hasSmsPermission) {
+                            Text(
+                                "Permesso SMS non concesso. Controlla le impostazioni dell'app.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.padding(top = 4.dp)
+                            )
+                        }
                     }
                 }
                 

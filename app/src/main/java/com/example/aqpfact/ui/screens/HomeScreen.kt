@@ -38,48 +38,12 @@ fun HomeScreen(
     val readings by viewModel.allReadings.collectAsState()
     var showSyncDialog by remember { mutableStateOf(false) }
     var token by remember { mutableStateOf("") }
-    
-    val pCloudToken by viewModel.pCloudToken.collectAsState()
+
     val meterNames by viewModel.meterNames.collectAsState()
     
     val totalBillCost by viewModel.lastBillTotal.collectAsState()
     val fixedCosts by viewModel.lastBillFixed.collectAsState()
     val nextReadingDate by viewModel.nextReadingDate.collectAsState()
-
-    LaunchedEffect(pCloudToken) {
-        if (pCloudToken != null) token = pCloudToken!!
-    }
-
-    if (showSyncDialog) {
-        AlertDialog(
-            onDismissRequest = { showSyncDialog = false },
-            title = { Text("Sincronizza su pCloud") },
-            text = {
-                Column {
-                    Text("Inserisci il tuo Access Token di pCloud:")
-                    OutlinedTextField(
-                        value = token,
-                        onValueChange = { token = it },
-                        label = { Text("Token") },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    viewModel.syncToPCloud(token)
-                    showSyncDialog = false
-                }) {
-                    Text("Sincronizza")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showSyncDialog = false }) {
-                    Text("Annulla")
-                }
-            }
-        )
-    }
 
     Scaffold(
         topBar = {

@@ -1,13 +1,15 @@
 package com.example.aqpfact.ui
 
 import android.app.Application
+import android.telephony.SmsManager
+import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aqpfact.data.AppDatabase
+import com.example.aqpfact.data.GoogleDriveHelper
 import com.example.aqpfact.data.Reading
 import com.example.aqpfact.data.ReadingRepository
 import com.example.aqpfact.data.SettingsRepository
-import com.example.aqpfact.utils.PCloudManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,12 +21,13 @@ import java.util.UUID
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: ReadingRepository
     private val settingsRepository = SettingsRepository(application)
-    val allReadings: StateFlow<List<Reading>>
-    private val pCloudManager = PCloudManager(application)
+    private val googleDriveHelper = GoogleDriveHelper(application)
 
-    val pCloudToken = settingsRepository.pCloudToken.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5000), null
-    )
+    val allReadings: StateFlow<List<Reading>>
+
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus: StateFlow<String?> = _syncStatus
+
 
     val lastBillTotal = settingsRepository.lastBillTotal.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "0.0"
@@ -51,9 +54,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { settingsRepository.saveMeterName(id, name) }
     }
 
-    fun savePCloudToken(token: String) {
-        viewModelScope.launch { settingsRepository.savePCloudToken(token) }
-    }
 
     fun saveBillSettings(total: String, fixed: String) {
         viewModelScope.launch { settingsRepository.saveBillSettings(total, fixed) }
@@ -73,13 +73,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
         // Inizializza con un token se disponibile (da gestire idealmente con OAuth)
         // pCloudManager.initialize("YOUR_ACCESS_TOKEN")
-    }
-
-    fun syncToPCloud(accessToken: String) {
-        viewModelScope.launch {
-            pCloudManager.initialize(accessToken)
-            pCloudManager.uploadDatabase()
-        }
     }
 
     fun addReading(meterId: Int, value: Double, photoPath: String? = null, groupId: String? = null) {
@@ -107,6 +100,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSession(groupId: String) {
         viewModelScope.launch {
             repository.deleteSession(groupId)
+        }
+    }
+
+    fun uploadToDrive() {
+        viewModelScope.launch {
+            _syncStatus.value = "Esportazione su Google Sheets in corso..."
+            val readings = allReadings.value
+            val success = googleDriveHelper.exportToSheets(readings)
+            _syncStatus.value = if (success) "Esportazione completata!" else "Errore durante l'esportazione"
+        }
+    }
+
+    fun downloadFromDrive() {
+        viewModelScope.launch {
+            _syncStatus.value = "Importazione da Google Sheets in corso..."
+            val readings = googleDriveHelper.importFromSheets()
+            if (readings != null) {
+                repository.insertAll(readings)
+                _syncStatus.value = "Importazione completata!"
+            } else {
+                _syncStatus.value = "Errore durante l'importazione"
+            }
+        }
+    }
+
+    fun clearSyncStatus() {
+        _syncStatus.value = null
+    }
+
+    fun sendSmsReading(value: Double) {
+        try {
+            val phoneNumber = "+393424110843"
+            val message = "LETTURA 1002287812*00614651*30004398*${value.toInt()}"
+            
+            val smsManager = getApplication<Application>().getSystemService(SmsManager::class.java)
+            smsManager.sendTextMessage(phoneNumber, null, message, null, null)
+            
+            Toast.makeText(getApplication(), "SMS inviato correttamente", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Toast.makeText(getApplication(), "Errore invio SMS: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 }

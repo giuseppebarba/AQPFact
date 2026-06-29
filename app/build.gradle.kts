@@ -33,6 +33,9 @@ android {
         }
     }
     packaging {
+        resources {
+            excludes += "/META-INF/DEPENDENCIES"
+        }
         jniLibs {
             useLegacyPackaging = false
         }
@@ -68,6 +71,9 @@ dependencies {
     implementation(libs.core.ktx)
     ksp(libs.androidx.room.compiler)
 
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
+
     // CameraX
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
@@ -82,12 +88,14 @@ dependencies {
     implementation(libs.vico.compose.m3)
     implementation(libs.vico.core)
 
-    // pCloud
-    implementation(libs.pcloud.android)
-    implementation(libs.pcloud.core)
-
-    // DataStore
-    implementation(libs.androidx.datastore.preferences)
+    // Google Drive
+    implementation(libs.play.services.auth)
+    implementation(libs.google.api.client.android)
+    implementation(libs.google.api.services.drive)
+    implementation(libs.google.api.services.sheets)
+    implementation(libs.google.http.client.gson) {
+        exclude(group = "org.apache.httpcomponents")
+    }
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

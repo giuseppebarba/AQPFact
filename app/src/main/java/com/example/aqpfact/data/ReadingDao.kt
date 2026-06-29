@@ -3,12 +3,16 @@ package com.example.aqpfact.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.OnConflictStrategy
 import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ReadingDao {
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(reading: Reading)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(readings: List<Reading>)
 
     @Query("SELECT * FROM readings ORDER BY date DESC")
     fun getAllReadings(): Flow<List<Reading>>

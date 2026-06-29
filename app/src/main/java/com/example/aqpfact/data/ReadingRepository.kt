@@ -11,6 +11,10 @@ class ReadingRepository(private val readingDao: ReadingDao) {
         readingDao.insert(reading)
     }
 
+    suspend fun insertAll(readings: List<Reading>) {
+        readingDao.insertAll(readings)
+    }
+
     suspend fun delete(id: Long) {
         readingDao.deleteById(id)
     }

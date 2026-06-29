@@ -16,7 +16,6 @@ val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "se
 class SettingsRepository(private val context: Context) {
 
     companion object {
-        val PCLOUD_TOKEN = stringPreferencesKey("pcloud_token")
         val METER_NAME_0 = stringPreferencesKey("meter_name_0")
         val METER_NAME_1 = stringPreferencesKey("meter_name_1")
         val METER_NAME_2 = stringPreferencesKey("meter_name_2")
@@ -24,10 +23,6 @@ class SettingsRepository(private val context: Context) {
         val LAST_BILL_TOTAL = stringPreferencesKey("last_bill_total")
         val LAST_BILL_FIXED = stringPreferencesKey("last_bill_fixed")
         val NEXT_READING_DATE = longPreferencesKey("next_reading_date")
-    }
-
-    val pCloudToken: Flow<String?> = context.dataStore.data.map { preferences ->
-        preferences[PCLOUD_TOKEN]
     }
 
     val lastBillTotal: Flow<String> = context.dataStore.data.map { it[LAST_BILL_TOTAL] ?: "0.0" }
@@ -41,12 +36,6 @@ class SettingsRepository(private val context: Context) {
             2 -> preferences[METER_NAME_2] ?: "Utenza 2"
             3 -> preferences[METER_NAME_3] ?: "Utenza 3"
             else -> "Utenza $id"
-        }
-    }
-
-    suspend fun savePCloudToken(token: String) {
-        context.dataStore.edit { preferences ->
-            preferences[PCLOUD_TOKEN] = token
         }
     }
 
