@@ -22,4 +22,9 @@ class ReadingRepository(private val readingDao: ReadingDao) {
     suspend fun deleteSession(groupId: String) {
         readingDao.deleteByGroupId(groupId)
     }
+
+    suspend fun clearAndInsert(readings: List<Reading>) {
+        readingDao.deleteAll()
+        readingDao.insertAll(readings)
+    }
 }

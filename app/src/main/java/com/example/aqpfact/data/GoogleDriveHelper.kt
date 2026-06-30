@@ -49,7 +49,12 @@ class GoogleDriveHelper(private val context: Context) {
             .setApplicationName("AQPFact").build()
     }
 
-    suspend fun exportToSheets(readings: List<Reading>): Boolean = withContext(Dispatchers.IO) {
+    suspend fun exportToSheets(
+        readings: List<Reading>,
+        totalBill: Double,
+        fixedCosts: Double,
+        meterNames: Map<Int, String>
+    ): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "exportToSheets: Starting export of ${readings.size} readings")
             val driveService = getDriveService() ?: run {
@@ -73,54 +78,92 @@ class GoogleDriveHelper(private val context: Context) {
                     name = "AQPFact_Readings"
                     mimeType = "application/vnd.google-apps.spreadsheet"
                 }
-                // Use Drive API to create the file with the specific title and mimeType
                 val file = driveService.files().create(fileMetadata).execute()
                 spreadsheetId = file.id
-                Log.d(TAG, "exportToSheets: Created new spreadsheet with ID: $spreadsheetId")
-            } else {
-                Log.d(TAG, "exportToSheets: Found existing spreadsheet with ID: $spreadsheetId")
             }
 
-            // 2. Prepare Data
-            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
-            val header = listOf("ID", "Data", "Contatore ID", "Valore", "Gruppo ID", "Foto Path")
+            // 2. Prepare Data (One row per session/groupId)
+            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
             
-            // Ordiniamo per data crescente per avere le letture più recenti in fondo (stile log)
-            val sortedReadings = readings.sortedBy { it.date }
-            
-            val rows = sortedReadings.map { reading ->
+            // Header
+            val header = listOf(
+                "Data", "Generale (m³)", 
+                "Contatore 1 (m³)", "Contatore 2 (m³)", "Contatore 3 (m³)",
+                "Costo Totale (€)", "Costi Fissi (€)",
+                "Utenza 1 (€)", "Utenza 2 (€)", "Utenza 3 (€)"
+            )
+
+            // Gruppiamo per groupId (le letture fatte insieme)
+            val sessions = readings.groupBy { it.groupId ?: "SINGLE_${it.id}" }
+                .toList()
+                .sortedBy { it.second.first().date } // Ordine cronologico
+
+            val readingsByMeter = readings.groupBy { it.meterId }
+                .mapValues { it.value.sortedBy { r -> r.date } }
+
+            val rows = sessions.map { (_, sessionReadings) ->
+                val date = sessionReadings.first().date
+                
+                // Valori delle letture correnti
+                val valGen = sessionReadings.find { it.meterId == 0 }?.value ?: 0.0
+                val valU1 = sessionReadings.find { it.meterId == 1 }?.value ?: 0.0
+                val valU2 = sessionReadings.find { it.meterId == 2 }?.value ?: 0.0
+                val valU3 = sessionReadings.find { it.meterId == 3 }?.value ?: 0.0
+
+                // Calcolo consumi (differenza con lettura precedente nel DB)
+                fun getCons(meterId: Int, currentVal: Double, currentDate: Long): Double {
+                    val prev = readingsByMeter[meterId]?.findLast { it.date < currentDate }
+                    return if (prev != null) (currentVal - prev.value).coerceAtLeast(0.0) else 0.0
+                }
+
+                val consU1 = getCons(1, valU1, date)
+                val consU2 = getCons(2, valU2, date)
+                val consU3 = getCons(3, valU3, date)
+                val totalCons = consU1 + consU2 + consU3
+
+                // Ripartizione costi
+                val varPart = (totalBill - fixedCosts).coerceAtLeast(0.0)
+                val fixedPerUser = fixedCosts / 3.0
+
+                fun calcUserCost(cons: Double): Double {
+                    val variable = if (totalCons > 0) (cons / totalCons) * varPart else 0.0
+                    return variable + fixedPerUser
+                }
+
+                val costU1 = calcUserCost(consU1)
+                val costU2 = calcUserCost(consU2)
+                val costU3 = calcUserCost(consU3)
+
                 listOf(
-                    reading.id.toString(),
-                    dateFormat.format(Date(reading.date)),
-                    reading.meterId.toString(),
-                    reading.value.toString(),
-                    reading.groupId ?: "",
-                    reading.photoPath ?: ""
+                    dateFormat.format(Date(date)),
+                    String.format(Locale.US, "%.2f", valGen),
+                    String.format(Locale.US, "%.2f", valU1),
+                    String.format(Locale.US, "%.2f", valU2),
+                    String.format(Locale.US, "%.2f", valU3),
+                    String.format(Locale.US, "%.2f", totalBill),
+                    String.format(Locale.US, "%.2f", fixedCosts),
+                    String.format(Locale.US, "%.2f", costU1),
+                    String.format(Locale.US, "%.2f", costU2),
+                    String.format(Locale.US, "%.2f", costU3)
                 )
             }
-            val body = ValueRange().setValues(listOf(header) + rows)
-            Log.d(TAG, "exportToSheets: Preparate ${rows.size} righe per l'esportazione")
 
-            // 3. Update the Sheet (overwrite existing content in the first sheet)
+            val body = ValueRange().setValues(listOf(header) + rows)
+
+            // 3. Update the Sheet
             val spreadsheet = sheetsService.spreadsheets().get(spreadsheetId)
                 .setFields("sheets.properties.title")
                 .execute()
             val sheetName = spreadsheet.sheets?.firstOrNull()?.properties?.title ?: "Sheet1"
 
-            Log.d(TAG, "exportToSheets: Updating sheet values for spreadsheetId: $spreadsheetId, sheet: $sheetName")
             sheetsService.spreadsheets().values()
                 .update(spreadsheetId, "'$sheetName'!A1", body)
                 .setValueInputOption("RAW")
                 .execute()
 
-            Log.d(TAG, "exportToSheets: Export successful")
             true
-        } catch (e: GoogleJsonResponseException) {
-            Log.e(TAG, "exportToSheets: Google API Error: ${e.details.message} (Code: ${e.statusCode})", e)
-            false
         } catch (e: Exception) {
-            Log.e(TAG, "exportToSheets: Unexpected error: ${e.message}", e)
-            e.printStackTrace()
+            Log.e(TAG, "exportToSheets Error: ${e.message}", e)
             false
         }
     }
@@ -145,7 +188,7 @@ class GoogleDriveHelper(private val context: Context) {
             val sheetName = spreadsheet.sheets?.firstOrNull()?.properties?.title ?: "Sheet1"
 
             val response = sheetsService.spreadsheets().values()
-                .get(spreadsheetId, "'$sheetName'!A:F")
+                .get(spreadsheetId, "'$sheetName'!A:K")
                 .execute()
 
             val values = response.getValues() ?: run {
@@ -158,25 +201,34 @@ class GoogleDriveHelper(private val context: Context) {
                 return@withContext emptyList<Reading>()
             }
 
-            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm:ss", Locale.getDefault())
+            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
-            val readings = values.drop(1).mapNotNull { row ->
+            val readings = mutableListOf<Reading>()
+            
+            // Saltiamo l'header e processiamo ogni riga (sessione)
+            values.drop(1).forEach { row ->
                 try {
-                    if (row.size < 4) return@mapNotNull null
-                    Reading(
-                        id = row[0].toString().toLongOrNull() ?: 0L,
-                        date = dateFormat.parse(row[1].toString())?.time ?: System.currentTimeMillis(),
-                        meterId = row[2].toString().toIntOrNull() ?: 0,
-                        value = row[3].toString().toDoubleOrNull() ?: 0.0,
-                        groupId = if (row.size > 4) row[4].toString().takeIf { it.isNotEmpty() } else null,
-                        photoPath = if (row.size > 5) row[5].toString().takeIf { it.isNotEmpty() } else null
-                    )
+                    if (row.isEmpty()) return@forEach
+                    
+                    val dateStr = row[0].toString()
+                    val timestamp = dateFormat.parse(dateStr)?.time ?: System.currentTimeMillis()
+                    val groupId = "IMPORT_${timestamp}"
+
+                    // Helper per estrarre Double in modo sicuro
+                    fun getVal(index: Int): Double = row.getOrNull(index)?.toString()?.toDoubleOrNull() ?: 0.0
+
+                    // Creiamo una Reading per ogni contatore presente nella riga
+                    // Indici: 1: Generale, 2: U1, 3: U2, 4: U3
+                    readings.add(Reading(meterId = 0, value = getVal(1), date = timestamp, groupId = groupId))
+                    readings.add(Reading(meterId = 1, value = getVal(2), date = timestamp, groupId = groupId))
+                    readings.add(Reading(meterId = 2, value = getVal(3), date = timestamp, groupId = groupId))
+                    readings.add(Reading(meterId = 3, value = getVal(4), date = timestamp, groupId = groupId))
+
                 } catch (e: Exception) {
                     Log.w(TAG, "importFromSheets: Error parsing row $row: ${e.message}")
-                    null
                 }
             }
-            Log.d(TAG, "importFromSheets: Successfully imported ${readings.size} readings")
+            Log.d(TAG, "importFromSheets: Successfully imported ${readings.size} readings from ${values.size - 1} sessions")
             readings
         } catch (e: GoogleJsonResponseException) {
             Log.e(TAG, "importFromSheets: Google API Error: ${e.details.message} (Code: ${e.statusCode})", e)

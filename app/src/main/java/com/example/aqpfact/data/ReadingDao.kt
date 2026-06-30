@@ -25,4 +25,7 @@ interface ReadingDao {
 
     @Query("DELETE FROM readings WHERE groupId = :groupId")
     suspend fun deleteByGroupId(groupId: String)
+
+    @Query("DELETE FROM readings")
+    suspend fun deleteAll()
 }

@@ -109,11 +109,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _syncStatus.value = "Esportazione su Google Sheets in corso..."
             try {
-                repository.allReadings.first().let { readings ->
-                    Log.d("MainViewModel", "Esportazione di ${readings.size} letture")
-                    val success = googleDriveHelper.exportToSheets(readings)
-                    _syncStatus.value = if (success) "Esportazione completata! (${readings.size} record)" else "Errore durante l'esportazione"
-                }
+                val readings = repository.allReadings.first()
+                val totalBill = lastBillTotal.first().toDoubleOrNull() ?: 0.0
+                val fixedCosts = lastBillFixed.first().toDoubleOrNull() ?: 0.0
+                val names = meterNames.first()
+                
+                Log.d("MainViewModel", "Esportazione di ${readings.size} letture")
+                val success = googleDriveHelper.exportToSheets(readings, totalBill, fixedCosts, names)
+                _syncStatus.value = if (success) "Esportazione completata! (${readings.size} record)" else "Errore durante l'esportazione"
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Errore durante l'upload", e)
                 _syncStatus.value = "Errore durante l'esportazione: ${e.message}"
@@ -126,8 +129,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _syncStatus.value = "Importazione da Google Sheets in corso..."
             val readings = googleDriveHelper.importFromSheets()
             if (readings != null) {
-                repository.insertAll(readings)
-                _syncStatus.value = "Importazione completata!"
+                repository.clearAndInsert(readings)
+                _syncStatus.value = "Importazione completata! (${readings.size} letture caricate)"
             } else {
                 _syncStatus.value = "Errore durante l'importazione"
             }
