@@ -1,6 +1,7 @@
 package com.example.aqpfact.ui
 
 import android.app.Application
+import android.util.Log
 import android.telephony.SmsManager
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -106,9 +108,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun uploadToDrive() {
         viewModelScope.launch {
             _syncStatus.value = "Esportazione su Google Sheets in corso..."
-            val readings = allReadings.value
-            val success = googleDriveHelper.exportToSheets(readings)
-            _syncStatus.value = if (success) "Esportazione completata!" else "Errore durante l'esportazione"
+            try {
+                repository.allReadings.first().let { readings ->
+                    Log.d("MainViewModel", "Esportazione di ${readings.size} letture")
+                    val success = googleDriveHelper.exportToSheets(readings)
+                    _syncStatus.value = if (success) "Esportazione completata! (${readings.size} record)" else "Errore durante l'esportazione"
+                }
+            } catch (e: Exception) {
+                Log.e("MainViewModel", "Errore durante l'upload", e)
+                _syncStatus.value = "Errore durante l'esportazione: ${e.message}"
+            }
         }
     }
 
@@ -127,6 +136,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun clearSyncStatus() {
         _syncStatus.value = null
+    }
+
+    fun updateSyncStatus(message: String) {
+        _syncStatus.value = message
     }
 
     fun sendSmsReading(value: Double) {

@@ -35,6 +35,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/INDEX.LIST"
         }
         jniLibs {
             useLegacyPackaging = false
@@ -53,6 +54,7 @@ android {
 }
 
 dependencies {
+    implementation(libs.google.http.client.android)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
@@ -68,7 +70,6 @@ dependencies {
     // Room
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
-    implementation(libs.core.ktx)
     ksp(libs.androidx.room.compiler)
 
     // DataStore

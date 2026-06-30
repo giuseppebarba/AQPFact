@@ -1,5 +1,6 @@
 package com.example.aqpfact.ui.screens
 
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -17,8 +18,10 @@ import androidx.compose.ui.unit.dp
 import com.example.aqpfact.ui.MainViewModel
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.api.services.drive.DriveScopes
+import com.google.api.services.sheets.v4.SheetsScopes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,23 +30,41 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val TAG = "SettingsScreen"
     val syncStatus by viewModel.syncStatus.collectAsState()
     val meterNames by viewModel.meterNames.collectAsState()
-    
-    val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-        .requestEmail()
-        .requestScopes(Scope(DriveScopes.DRIVE_FILE))
-        .build()
-    val googleSignInClient = GoogleSignIn.getClient(context, gso)
 
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        // Handle result if needed
+    var currentUserEmail by remember { 
+        mutableStateOf(GoogleSignIn.getLastSignedInAccount(context)?.email) 
+    }
+    
+    val gso = remember {
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestEmail()
+            .requestScopes(Scope(DriveScopes.DRIVE_FILE), Scope(SheetsScopes.SPREADSHEETS))
+            .build()
+    }
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        Log.d(TAG, "Launcher result code: ${result.resultCode}")
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            currentUserEmail = account?.email
+            Log.d(TAG, "Sign-in successful: ${account?.email}")
+            viewModel.updateSyncStatus("Accesso effettuato come: ${account?.email}")
+        } catch (e: ApiException) {
+            Log.e(TAG, "Sign-in failed: status code=${e.statusCode}, message=${e.message}, cause=${e.cause}")
+            viewModel.updateSyncStatus("Errore accesso: codice ${e.statusCode}")
+        }
     }
 
     var n0 by remember { mutableStateOf("") }
     var n1 by remember { mutableStateOf("") }
     var n2 by remember { mutableStateOf("") }
     var n3 by remember { mutableStateOf("") }
+
 
     LaunchedEffect(meterNames) {
         if (meterNames.isNotEmpty()) {
@@ -94,11 +115,27 @@ fun SettingsScreen(
                 Text("Sincronizzazione Google Drive", style = MaterialTheme.typography.titleLarge)
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                Button(
-                    onClick = { launcher.launch(googleSignInClient.signInIntent) },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Accedi con Google")
+                if (currentUserEmail != null) {
+                    Text("Connesso come: $currentUserEmail", style = MaterialTheme.typography.bodyMedium)
+                    Button(
+                        onClick = { 
+                            googleSignInClient.signOut().addOnCompleteListener {
+                                currentUserEmail = null
+                                Log.d(TAG, "Signed out")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.errorContainer, contentColor = MaterialTheme.colorScheme.onErrorContainer)
+                    ) {
+                        Text("Disconnetti")
+                    }
+                } else {
+                    Button(
+                        onClick = { launcher.launch(googleSignInClient.signInIntent) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Accedi con Google")
+                    }
                 }
                 
                 Row(
@@ -107,7 +144,8 @@ fun SettingsScreen(
                 ) {
                     Button(
                         onClick = { viewModel.uploadToDrive() },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = currentUserEmail != null
                     ) {
                         Icon(Icons.Default.CloudUpload, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
@@ -115,7 +153,8 @@ fun SettingsScreen(
                     }
                     Button(
                         onClick = { viewModel.downloadFromDrive() },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        enabled = currentUserEmail != null
                     ) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null)
                         Spacer(modifier = Modifier.width(8.dp))
