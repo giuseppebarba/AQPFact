@@ -11,5 +11,6 @@ data class Reading(
     val value: Double,
     val date: Long,
     val photoPath: String? = null,
-    val groupId: String? = null // To group readings taken in the same session
+    val groupId: String? = null, // To group readings taken in the same session
+    val manualCost: Double? = null // To store manually edited or previously calculated cost from Sheets
 )

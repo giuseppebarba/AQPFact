@@ -59,6 +59,13 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    suspend fun resetBillSettings() {
+        context.dataStore.edit { preferences ->
+            preferences[LAST_BILL_TOTAL] = "0.0"
+            preferences[LAST_BILL_FIXED] = "0.0"
+        }
+    }
+
     suspend fun saveNextReadingDate(date: Long?) {
         context.dataStore.edit { preferences ->
             if (date != null) {

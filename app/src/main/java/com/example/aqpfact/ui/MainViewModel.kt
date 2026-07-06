@@ -90,6 +90,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             readings.forEach { (meterId, value, photoPath) ->
                 repository.insert(Reading(meterId = meterId, value = value, date = date, photoPath = photoPath, groupId = groupId))
             }
+            // Azzera i costi della bolletta precedente dopo una nuova lettura di gruppo
+            settingsRepository.resetBillSettings()
         }
     }
 
@@ -127,9 +129,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun downloadFromDrive() {
         viewModelScope.launch {
             _syncStatus.value = "Importazione da Google Sheets in corso..."
-            val readings = googleDriveHelper.importFromSheets()
-            if (readings != null) {
+            val result = googleDriveHelper.importFromSheets()
+            if (result != null) {
+                val (readings, billInfo) = result
                 repository.clearAndInsert(readings)
+                
+                // Ripristina anche i dati dell'ultima bolletta se presenti
+                billInfo?.let { (total, fixed) ->
+                    settingsRepository.saveBillSettings(total.toString(), fixed.toString())
+                }
+
                 _syncStatus.value = "Importazione completata! (${readings.size} letture caricate)"
             } else {
                 _syncStatus.value = "Errore durante l'importazione"
@@ -148,7 +157,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun sendSmsReading(value: Double) {
         try {
             val phoneNumber = "+393424110843"
-            val message = "LETTURA 1002287812*00614651*30004398*${value.toInt()}"
+            val message = "LETTURA 1002287812*00614651*3000439883*${value.toInt()}"
             
             val smsManager = getApplication<Application>().getSystemService(SmsManager::class.java)
             smsManager.sendTextMessage(phoneNumber, null, message, null, null)

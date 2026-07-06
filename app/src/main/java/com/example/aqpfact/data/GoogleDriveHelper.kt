@@ -74,12 +74,13 @@ class GoogleDriveHelper(private val context: Context) {
 
             if (spreadsheetId == null) {
                 Log.d(TAG, "exportToSheets: Spreadsheet not found, creating new one")
-                val fileMetadata = com.google.api.services.drive.model.File().apply {
-                    name = "AQPFact_Readings"
-                    mimeType = "application/vnd.google-apps.spreadsheet"
+                val spreadsheetMetadata = Spreadsheet().apply {
+                    properties = SpreadsheetProperties().apply {
+                        title = "AQPFact_Readings"
+                    }
                 }
-                val file = driveService.files().create(fileMetadata).execute()
-                spreadsheetId = file.id
+                val createdSpreadsheet = sheetsService.spreadsheets().create(spreadsheetMetadata).execute()
+                spreadsheetId = createdSpreadsheet.spreadsheetId
             }
 
             // 2. Prepare Data (One row per session/groupId)
@@ -94,14 +95,11 @@ class GoogleDriveHelper(private val context: Context) {
             )
 
             // Gruppiamo per groupId (le letture fatte insieme)
-            val sessions = readings.groupBy { it.groupId ?: "SINGLE_${it.id}" }
+            val sortedSessions = readings.groupBy { it.groupId ?: "SINGLE_${it.id}" }
                 .toList()
                 .sortedBy { it.second.first().date } // Ordine cronologico
 
-            val readingsByMeter = readings.groupBy { it.meterId }
-                .mapValues { it.value.sortedBy { r -> r.date } }
-
-            val rows = sessions.map { (_, sessionReadings) ->
+            val rows = sortedSessions.mapIndexed { index, (groupId, sessionReadings) ->
                 val date = sessionReadings.first().date
                 
                 // Valori delle letture correnti
@@ -110,29 +108,45 @@ class GoogleDriveHelper(private val context: Context) {
                 val valU2 = sessionReadings.find { it.meterId == 2 }?.value ?: 0.0
                 val valU3 = sessionReadings.find { it.meterId == 3 }?.value ?: 0.0
 
-                // Calcolo consumi (differenza con lettura precedente nel DB)
-                fun getCons(meterId: Int, currentVal: Double, currentDate: Long): Double {
-                    val prev = readingsByMeter[meterId]?.findLast { it.date < currentDate }
-                    return if (prev != null) (currentVal - prev.value).coerceAtLeast(0.0) else 0.0
+                // Calcolo consumi tra questa sessione e la precedente
+                val prevSession = if (index > 0) sortedSessions[index - 1].second else null
+                
+                fun getCons(meterId: Int, currentVal: Double): Double {
+                    val prevVal = prevSession?.find { it.meterId == meterId }?.value
+                    return if (prevVal != null) (currentVal - prevVal).coerceAtLeast(0.0) else 0.0
                 }
 
-                val consU1 = getCons(1, valU1, date)
-                val consU2 = getCons(2, valU2, date)
-                val consU3 = getCons(3, valU3, date)
-                val totalCons = consU1 + consU2 + consU3
+                val consU1 = getCons(1, valU1)
+                val consU2 = getCons(2, valU2)
+                val consU3 = getCons(3, valU3)
+                val totalConsSubMeters = consU1 + consU2 + consU3
 
-                // Ripartizione costi
-                val varPart = (totalBill - fixedCosts).coerceAtLeast(0.0)
-                val fixedPerUser = fixedCosts / 3.0
+                // Ripartizione costi (priorità ai costi manuali salvati nel DB)
+                val manualU1 = sessionReadings.find { it.meterId == 1 }?.manualCost
+                val manualU2 = sessionReadings.find { it.meterId == 2 }?.manualCost
+                val manualU3 = sessionReadings.find { it.meterId == 3 }?.manualCost
 
-                fun calcUserCost(cons: Double): Double {
-                    val variable = if (totalCons > 0) (cons / totalCons) * varPart else 0.0
-                    return variable + fixedPerUser
+                val costU1: Double
+                val costU2: Double
+                val costU3: Double
+
+                if (manualU1 != null && manualU2 != null && manualU3 != null) {
+                    costU1 = manualU1
+                    costU2 = manualU2
+                    costU3 = manualU3
+                } else {
+                    val varPart = (totalBill - fixedCosts).coerceAtLeast(0.0)
+                    val fixedPerUser = fixedCosts / 3.0
+
+                    fun calcUserCost(cons: Double): Double {
+                        val variable = if (totalConsSubMeters > 0) (cons / totalConsSubMeters) * varPart else 0.0
+                        return variable + fixedPerUser
+                    }
+
+                    costU1 = calcUserCost(consU1)
+                    costU2 = calcUserCost(consU2)
+                    costU3 = calcUserCost(consU3)
                 }
-
-                val costU1 = calcUserCost(consU1)
-                val costU2 = calcUserCost(consU2)
-                val costU3 = calcUserCost(consU3)
 
                 listOf(
                     dateFormat.format(Date(date)),
@@ -152,9 +166,9 @@ class GoogleDriveHelper(private val context: Context) {
 
             // 3. Update the Sheet
             val spreadsheet = sheetsService.spreadsheets().get(spreadsheetId)
-                .setFields("sheets.properties.title")
                 .execute()
             val sheetName = spreadsheet.sheets?.firstOrNull()?.properties?.title ?: "Sheet1"
+            Log.d(TAG, "exportToSheets: Using sheet name '$sheetName' for spreadsheet $spreadsheetId")
 
             sheetsService.spreadsheets().values()
                 .update(spreadsheetId, "'$sheetName'!A1", body)
@@ -162,13 +176,16 @@ class GoogleDriveHelper(private val context: Context) {
                 .execute()
 
             true
+        } catch (e: GoogleJsonResponseException) {
+            Log.e(TAG, "exportToSheets: Google API Error: ${e.details?.message ?: e.message} (Code: ${e.statusCode})", e)
+            false
         } catch (e: Exception) {
             Log.e(TAG, "exportToSheets Error: ${e.message}", e)
             false
         }
     }
 
-    suspend fun importFromSheets(): List<Reading>? = withContext(Dispatchers.IO) {
+    suspend fun importFromSheets(): Pair<List<Reading>, Pair<Double, Double>?>? = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "importFromSheets: Starting import")
             val driveService = getDriveService() ?: return@withContext null
@@ -183,9 +200,9 @@ class GoogleDriveHelper(private val context: Context) {
 
             Log.d(TAG, "importFromSheets: Fetching values from spreadsheetId: $spreadsheetId")
             val spreadsheet = sheetsService.spreadsheets().get(spreadsheetId)
-                .setFields("sheets.properties.title")
                 .execute()
             val sheetName = spreadsheet.sheets?.firstOrNull()?.properties?.title ?: "Sheet1"
+            Log.d(TAG, "importFromSheets: Using sheet name '$sheetName'")
 
             val response = sheetsService.spreadsheets().values()
                 .get(spreadsheetId, "'$sheetName'!A:K")
@@ -193,17 +210,18 @@ class GoogleDriveHelper(private val context: Context) {
 
             val values = response.getValues() ?: run {
                 Log.d(TAG, "importFromSheets: No values found in sheet")
-                return@withContext emptyList<Reading>()
+                return@withContext (emptyList<Reading>() to null)
             }
             
             if (values.size <= 1) {
                 Log.d(TAG, "importFromSheets: Sheet contains only header or is empty")
-                return@withContext emptyList<Reading>()
+                return@withContext (emptyList<Reading>() to null)
             }
 
             val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.getDefault())
 
             val readings = mutableListOf<Reading>()
+            var lastBillInfo: Pair<Double, Double>? = null
             
             // Saltiamo l'header e processiamo ogni riga (sessione)
             values.drop(1).forEach { row ->
@@ -219,17 +237,25 @@ class GoogleDriveHelper(private val context: Context) {
 
                     // Creiamo una Reading per ogni contatore presente nella riga
                     // Indici: 1: Generale, 2: U1, 3: U2, 4: U3
+                    // Costi manuali: 7: Costo U1, 8: Costo U2, 9: Costo U3
                     readings.add(Reading(meterId = 0, value = getVal(1), date = timestamp, groupId = groupId))
-                    readings.add(Reading(meterId = 1, value = getVal(2), date = timestamp, groupId = groupId))
-                    readings.add(Reading(meterId = 2, value = getVal(3), date = timestamp, groupId = groupId))
-                    readings.add(Reading(meterId = 3, value = getVal(4), date = timestamp, groupId = groupId))
+                    readings.add(Reading(meterId = 1, value = getVal(2), date = timestamp, groupId = groupId, manualCost = getVal(7).takeIf { it > 0 }))
+                    readings.add(Reading(meterId = 2, value = getVal(3), date = timestamp, groupId = groupId, manualCost = getVal(8).takeIf { it > 0 }))
+                    readings.add(Reading(meterId = 3, value = getVal(4), date = timestamp, groupId = groupId, manualCost = getVal(9).takeIf { it > 0 }))
+
+                    // Recuperiamo l'ultima bolletta inserita (l'ultima riga del foglio)
+                    val billTotal = getVal(5)
+                    val fixedCosts = getVal(6)
+                    if (billTotal > 0) {
+                        lastBillInfo = billTotal to fixedCosts
+                    }
 
                 } catch (e: Exception) {
                     Log.w(TAG, "importFromSheets: Error parsing row $row: ${e.message}")
                 }
             }
-            Log.d(TAG, "importFromSheets: Successfully imported ${readings.size} readings from ${values.size - 1} sessions")
-            readings
+            Log.d(TAG, "importFromSheets: Successfully imported ${readings.size} readings and bill info: $lastBillInfo")
+            readings to lastBillInfo
         } catch (e: GoogleJsonResponseException) {
             Log.e(TAG, "importFromSheets: Google API Error: ${e.details.message} (Code: ${e.statusCode})", e)
             null
