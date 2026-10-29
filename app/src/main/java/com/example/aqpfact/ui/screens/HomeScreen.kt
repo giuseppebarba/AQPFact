@@ -41,8 +41,7 @@ fun HomeScreen(
 
     val meterNames by viewModel.meterNames.collectAsState()
     
-    val totalBillCost by viewModel.lastBillTotal.collectAsState()
-    val fixedCosts by viewModel.lastBillFixed.collectAsState()
+    val billDetails by viewModel.billDetails.collectAsState()
     val nextReadingDate by viewModel.nextReadingDate.collectAsState()
 
     Scaffold(
@@ -86,10 +85,6 @@ fun HomeScreen(
                     
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    val totalBill = totalBillCost.toDoubleOrNull() ?: 0.0
-                    val totalFixed = fixedCosts.toDoubleOrNull() ?: 0.0
-                    val totalVariable = (totalBill - totalFixed).coerceAtLeast(0.0)
-                    
                     val readingsByMeter = readings.groupBy { it.meterId }
                     val userConsumptions = (1..3).map { id ->
                         val userReadings = readingsByMeter[id] ?: emptyList()
@@ -105,13 +100,11 @@ fun HomeScreen(
                     userConsumptions.forEachIndexed { index, consumption ->
                         val id = index + 1
                         val meterName = meterNames[id] ?: "Utenza $id"
-                        val varCost = if (totalConsumption > 0) (consumption / totalConsumption) * totalVariable else 0.0
-                        val fixedCost = totalFixed / 3.0
-                        val total = varCost + fixedCost
+                        val userShare = billDetails.calculateUserShare(consumption, totalConsumption, 3)
                         
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("$meterName:", style = MaterialTheme.typography.bodyMedium)
-                            Text("${String.format(Locale.getDefault(), "%.2f", total)} € (${String.format(Locale.getDefault(), "%.1f", consumption)} m³)", style = MaterialTheme.typography.bodyLarge)
+                            Text("${String.format(Locale.getDefault(), "%.2f", userShare.netShare)} € (${String.format(Locale.getDefault(), "%.1f", consumption)} m³)", style = MaterialTheme.typography.bodyLarge)
                         }
                     }
 

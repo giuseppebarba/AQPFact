@@ -54,6 +54,12 @@ class GoogleDriveHelper(private val context: Context) {
         totalBill: Double,
         fixedCosts: Double,
         meterNames: Map<Int, String>
+    ): Boolean = exportToSheets(readings, BillDetails(total = totalBill.toString(), fixed = fixedCosts.toString()), meterNames)
+
+    suspend fun exportToSheets(
+        readings: List<Reading>,
+        billDetails: BillDetails,
+        meterNames: Map<Int, String>
     ): Boolean = withContext(Dispatchers.IO) {
         try {
             Log.d(TAG, "exportToSheets: Starting export of ${readings.size} readings")
@@ -135,17 +141,9 @@ class GoogleDriveHelper(private val context: Context) {
                     costU2 = manualU2
                     costU3 = manualU3
                 } else {
-                    val varPart = (totalBill - fixedCosts).coerceAtLeast(0.0)
-                    val fixedPerUser = fixedCosts / 3.0
-
-                    fun calcUserCost(cons: Double): Double {
-                        val variable = if (totalConsSubMeters > 0) (cons / totalConsSubMeters) * varPart else 0.0
-                        return variable + fixedPerUser
-                    }
-
-                    costU1 = calcUserCost(consU1)
-                    costU2 = calcUserCost(consU2)
-                    costU3 = calcUserCost(consU3)
+                    costU1 = billDetails.calculateUserShare(consU1, totalConsSubMeters, 3).netShare
+                    costU2 = billDetails.calculateUserShare(consU2, totalConsSubMeters, 3).netShare
+                    costU3 = billDetails.calculateUserShare(consU3, totalConsSubMeters, 3).netShare
                 }
 
                 listOf(
@@ -154,8 +152,8 @@ class GoogleDriveHelper(private val context: Context) {
                     String.format(Locale.US, "%.2f", valU1),
                     String.format(Locale.US, "%.2f", valU2),
                     String.format(Locale.US, "%.2f", valU3),
-                    String.format(Locale.US, "%.2f", totalBill),
-                    String.format(Locale.US, "%.2f", fixedCosts),
+                    String.format(Locale.US, "%.2f", billDetails.totalCostDouble),
+                    String.format(Locale.US, "%.2f", billDetails.fixedDouble),
                     String.format(Locale.US, "%.2f", costU1),
                     String.format(Locale.US, "%.2f", costU2),
                     String.format(Locale.US, "%.2f", costU3)

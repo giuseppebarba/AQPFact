@@ -31,8 +31,7 @@ fun ReportScreen(
     val readings by viewModel.allReadings.collectAsState()
     val meterNames by viewModel.meterNames.collectAsState()
     
-    val totalBillCost by viewModel.lastBillTotal.collectAsState()
-    val fixedCosts by viewModel.lastBillFixed.collectAsState()
+    val billDetails by viewModel.billDetails.collectAsState()
 
     val numUsers = 3
     val readingsByMeter = readings.groupBy { it.meterId }
@@ -62,8 +61,7 @@ fun ReportScreen(
                             context,
                             readings,
                             meterNames,
-                            totalBillCost,
-                            fixedCosts
+                            billDetails
                         )
                         if (file != null) {
                             val uri = FileProvider.getUriForFile(context, "com.example.aqpfact.fileprovider", file)
@@ -87,13 +85,24 @@ fun ReportScreen(
                     modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("Parametri Fatturazione", style = MaterialTheme.typography.titleMedium)
-                        Text("Totale Bolletta: $totalBillCost €")
-                        Text("Spese Fisse: $fixedCosts €")
+                        Text("Costo Totale: ${String.format(Locale.getDefault(), "%.2f", billDetails.totalCostDouble)} €")
+                        Text("Quota Fissa: ${billDetails.fixed} €")
+                        if (billDetails.aqueductDouble > 0) Text("Servizio Acquedotto: ${billDetails.aqueduct} €")
+                        if (billDetails.sewerageDouble > 0) Text("Servizio Fognatura: ${billDetails.sewerage} €")
+                        if (billDetails.purificationDouble > 0) Text("Servizio Depurazione: ${billDetails.purification} €")
+                        if (billDetails.chargesDouble > 0) Text("Oneri: ${billDetails.charges} €")
+                        if (billDetails.otherDouble != 0.0) Text("Addebiti/Accrediti Diversi: ${billDetails.other} €")
+                        if (billDetails.taxableDouble > 0) Text("Totale Imponibile: ${billDetails.taxable} € (IVA 10%: ${String.format(Locale.getDefault(), "%.2f", billDetails.vat10Double)} €)")
+                        Text("Totale Costi Variabili: ${String.format(Locale.getDefault(), "%.2f", billDetails.variableDouble)} €")
+                        if (billDetails.advancesDouble != 0.0) {
+                            Text("Acconti Precedenti: ${billDetails.advances} € (Copertura: ${String.format(Locale.getDefault(), "%.2f", billDetails.advancesPercentage * 100)}%)")
+                        }
                         Text(
-                            "Puoi modificare questi valori nella schermata dei parametri in Home.",
-                            style = MaterialTheme.typography.bodySmall
+                            "Puoi modificare questi valori nella schermata dei parametri bolletta.",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.padding(top = 8.dp)
                         )
                     }
                 }
@@ -101,18 +110,9 @@ fun ReportScreen(
 
             item {
                 Text("Ripartizione Spese", style = MaterialTheme.typography.titleLarge)
-                val totalBill = totalBillCost.toDoubleOrNull() ?: 0.0
-                val totalFixed = fixedCosts.toDoubleOrNull() ?: 0.0
-                val totalVariable = (totalBill - totalFixed).coerceAtLeast(0.0)
-                
-                val fixedPerUser = totalFixed / numUsers
 
                 userConsumptions.forEach { (id, consumption) ->
-                    val variableCost = if (totalConsumptionAll > 0) {
-                        (consumption / totalConsumptionAll) * totalVariable
-                    } else 0.0
-                    
-                    val totalUserCost = variableCost + fixedPerUser
+                    val share = billDetails.calculateUserShare(consumption, totalConsumptionAll, numUsers)
 
                     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                         Column(modifier = Modifier.padding(12.dp)) {
@@ -120,9 +120,13 @@ fun ReportScreen(
                             Text(meterNames[id] ?: "Utenza $id", style = MaterialTheme.typography.titleMedium)
                             Text("Ultima Lettura: $lastReading m³")
                             Text("Consumo Periodo: ${String.format(Locale.getDefault(), "%.2f", consumption)} m³")
-                            Text("Quota Variabile: ${String.format(Locale.getDefault(), "%.2f", variableCost)} €")
-                            Text("Quota Fissa: ${String.format(Locale.getDefault(), "%.2f", fixedPerUser)} €")
-                            Text("TOTALE: ${String.format(Locale.getDefault(), "%.2f", totalUserCost)} €", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                            Text("Quota Fissa: ${String.format(Locale.getDefault(), "%.2f", share.fixedShare)} €")
+                            Text("Quota Variabile: ${String.format(Locale.getDefault(), "%.2f", share.variableShare)} €")
+                            Text("Quota Lorda: ${String.format(Locale.getDefault(), "%.2f", share.grossShare)} €")
+                            if (share.discount > 0) {
+                                Text("Sconto Acconti (${String.format(Locale.getDefault(), "%.2f", billDetails.advancesPercentage * 100)}%): -${String.format(Locale.getDefault(), "%.2f", share.discount)} €", color = MaterialTheme.colorScheme.tertiary)
+                            }
+                            Text("TOTALE NETTO: ${String.format(Locale.getDefault(), "%.2f", share.netShare)} €", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         }
                     }
                 }

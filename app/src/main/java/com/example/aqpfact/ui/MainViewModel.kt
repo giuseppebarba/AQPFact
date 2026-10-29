@@ -7,6 +7,7 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.aqpfact.data.AppDatabase
+import com.example.aqpfact.data.BillDetails
 import com.example.aqpfact.data.GoogleDriveHelper
 import com.example.aqpfact.data.Reading
 import com.example.aqpfact.data.ReadingRepository
@@ -30,6 +31,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _syncStatus = MutableStateFlow<String?>(null)
     val syncStatus: StateFlow<String?> = _syncStatus
 
+    val billDetails: StateFlow<BillDetails> = settingsRepository.billDetails.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5000), BillDetails()
+    )
 
     val lastBillTotal = settingsRepository.lastBillTotal.stateIn(
         viewModelScope, SharingStarted.WhileSubscribed(5000), "0.0"
@@ -56,9 +60,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { settingsRepository.saveMeterName(id, name) }
     }
 
-
-    fun saveBillSettings(total: String, fixed: String) {
-        viewModelScope.launch { settingsRepository.saveBillSettings(total, fixed) }
+    fun saveBillSettings(
+        total: String,
+        fixed: String,
+        aqueduct: String = "0.0",
+        sewerage: String = "0.0",
+        purification: String = "0.0",
+        charges: String = "0.0",
+        bonus: String = "0.0",
+        advances: String = "0.0",
+        other: String = "0.0",
+        taxable: String = "0.0"
+    ) {
+        viewModelScope.launch {
+            settingsRepository.saveBillSettings(
+                total = total,
+                fixed = fixed,
+                aqueduct = aqueduct,
+                sewerage = sewerage,
+                purification = purification,
+                charges = charges,
+                bonus = bonus,
+                advances = advances,
+                other = other,
+                taxable = taxable
+            )
+        }
     }
 
     fun saveNextReadingDate(date: Long?) {
@@ -112,12 +139,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             _syncStatus.value = "Esportazione su Google Sheets in corso..."
             try {
                 val readings = repository.allReadings.first()
-                val totalBill = lastBillTotal.first().toDoubleOrNull() ?: 0.0
-                val fixedCosts = lastBillFixed.first().toDoubleOrNull() ?: 0.0
+                val bill = billDetails.first()
                 val names = meterNames.first()
                 
                 Log.d("MainViewModel", "Esportazione di ${readings.size} letture")
-                val success = googleDriveHelper.exportToSheets(readings, totalBill, fixedCosts, names)
+                val success = googleDriveHelper.exportToSheets(readings, bill, names)
                 _syncStatus.value = if (success) "Esportazione completata! (${readings.size} record)" else "Errore durante l'esportazione"
             } catch (e: Exception) {
                 Log.e("MainViewModel", "Errore durante l'upload", e)
